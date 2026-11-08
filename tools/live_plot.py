@@ -9,15 +9,27 @@ Usage:
 Lines starting with '#' (startup info) are echoed to the terminal; plotting
 starts once the CSV header 't_ms,ax,ay,az,gx,gy,gz,temp_c' arrives.
 Close the window or press Ctrl+C to quit.
+
+Recording a test: type a name (and optionally a duration in seconds) in the
+bar under the plot, then press "Start test". Press "Stop & save" (or let the
+duration run out). Every sample is written to recordings/<date>_<time>_<name>.csv
+along with a .png overview of the whole test. Load the CSV with
+pandas.read_csv(path, comment="#").
 """
 import argparse
 import collections
+import datetime as dt
+import re
 import sys
 import threading
 import time
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.figure import Figure
+from matplotlib.widgets import Button, TextBox
 import serial
 from serial.tools import list_ports
 
@@ -28,6 +40,8 @@ RATE_HZ = 104
 # both panels, so X/Y/Z read consistently between accel and gyro.
 AXIS_COLORS = ["#2a78d6", "#eb6834", "#1baf7a"]
 INK, MUTED, GRID = "#1f1f1e", "#6b6a64", "#e6e5e0"
+REC_RED = "#d03b3b"
+DEFAULT_OUT_DIR = Path(__file__).resolve().parent.parent / "recordings"
 
 
 def guess_port():
@@ -47,6 +61,9 @@ class Reader(threading.Thread):
         self.cols = [collections.deque(maxlen=maxlen) for _ in range(7)]
         self.streaming = False
         self.stop = False
+        self.meta = []          # firmware '#' startup lines (chip, bias, ...)
+        self.recording = False
+        self.rec_lines = []     # raw CSV lines captured while recording
 
     def run(self):
         while not self.stop:
@@ -59,6 +76,9 @@ class Reader(threading.Thread):
                 continue
             if line.startswith("#"):
                 print(line)
+                if "LSM6 IMU streamer" in line:  # board was reset: new session
+                    self.meta = []
+                self.meta.append(line)
                 continue
             if line == HEADER:
                 self.streaming = True
@@ -77,10 +97,79 @@ class Reader(threading.Thread):
                 self.t.append(vals[0] / 1000.0)
                 for i in range(7):
                     self.cols[i].append(vals[i + 1])
+                if self.recording:
+                    self.rec_lines.append(line)  # keep firmware's exact text
+
+    def start_recording(self):
+        with self.lock:
+            self.rec_lines = []
+            self.recording = True
+
+    def stop_recording(self):
+        with self.lock:
+            self.recording = False
+            lines, self.rec_lines = self.rec_lines, []
+            return lines, list(self.meta)
+
+    def rec_count(self):
+        with self.lock:
+            return len(self.rec_lines)
 
     def snapshot(self):
         with self.lock:
             return list(self.t), [list(c) for c in self.cols]
+
+
+def safe_name(name):
+    name = re.sub(r"[^A-Za-z0-9_-]+", "-", name.strip()).strip("-")
+    return name or "test"
+
+
+def save_recording(out_dir, name, lines, meta, port, started, note=""):
+    """Write the CSV and an overview PNG. Returns the CSV path."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = f"{started:%Y-%m-%d_%H%M%S}_{safe_name(name)}"
+    csv_path = out_dir / f"{stem}.csv"
+    rows = [[float(x) for x in ln.split(",")] for ln in lines]
+    dur = (rows[-1][0] - rows[0][0]) / 1000.0 if len(rows) > 1 else 0.0
+    with open(csv_path, "w") as f:
+        f.write(f"# test: {name}\n")
+        f.write(f"# started: {started.isoformat(timespec='seconds')}\n")
+        f.write(f"# port: {port}\n")
+        f.write(f"# samples: {len(rows)}  duration_s: {dur:.2f}  "
+                f"rate_hz: {(len(rows) - 1) / dur if dur else 0:.1f}\n")
+        if note:
+            f.write(f"# note: {note}\n")
+        f.write("# units: t_ms = board millis(), a* = g, g* = dps (bias removed), temp_c = degC\n")
+        for m in meta:
+            f.write(m + "\n")
+        f.write(HEADER + "\n")
+        for ln in lines:
+            f.write(ln + "\n")
+
+    # Overview PNG, drawn off-screen so no extra window pops up.
+    if rows:
+        t0 = rows[0][0]
+        t = [(r[0] - t0) / 1000.0 for r in rows]
+        fig = Figure(figsize=(10, 6.5))
+        FigureCanvasAgg(fig)
+        axs = fig.subplots(2, 1, sharex=True)
+        for ax, off, title, names in ((axs[0], 1, "Acceleration (g)", ["ax", "ay", "az"]),
+                                      (axs[1], 4, "Angular rate (dps)", ["gx", "gy", "gz"])):
+            for k, (n, c) in enumerate(zip(names, AXIS_COLORS)):
+                ax.plot(t, [r[off + k] for r in rows], color=c, linewidth=1.4, label=n)
+            ax.set_title(title, loc="left", fontsize=11, color=INK)
+            ax.grid(True, color=GRID, linewidth=0.8)
+            ax.axhline(0, color=MUTED, linewidth=0.8)
+            for sp in ("top", "right"):
+                ax.spines[sp].set_visible(False)
+            ax.legend(loc="upper left", ncol=3, frameon=False, fontsize=9)
+        axs[1].set_xlabel("time since start of test (s)")
+        fig.suptitle(f"{name}  -  {started:%Y-%m-%d %H:%M:%S}  -  {len(rows)} samples, {dur:.1f} s",
+                     x=0.01, ha="left", fontsize=10, color=MUTED)
+        fig.tight_layout()
+        fig.savefig(csv_path.with_suffix(".png"), dpi=110)
+    return csv_path
 
 
 def main():
@@ -88,6 +177,8 @@ def main():
     ap.add_argument("port", nargs="?", help="serial port (auto-detected if omitted)")
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--window", type=float, default=10.0, help="seconds of history to show")
+    ap.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR,
+                    help=f"where test recordings are saved (default: {DEFAULT_OUT_DIR})")
     args = ap.parse_args()
 
     port = args.port or guess_port()
@@ -114,7 +205,7 @@ def main():
 
     plt.rcParams.update({"axes.edgecolor": GRID, "axes.labelcolor": MUTED,
                          "xtick.color": MUTED, "ytick.color": MUTED, "text.color": INK})
-    fig, (ax_a, ax_g) = plt.subplots(2, 1, sharex=True, figsize=(10, 6.5))
+    fig, (ax_a, ax_g) = plt.subplots(2, 1, sharex=True, figsize=(10, 7.2))
     fig.canvas.manager.set_window_title(f"LSM6 IMU - {port}")
     panels = [
         (ax_a, "Acceleration", "g", ["ax", "ay", "az"], (-1.5, 1.5)),
@@ -136,7 +227,50 @@ def main():
     legends = [ax.legend(loc="upper left", ncol=3, frameon=False, fontsize=9) for ax in (ax_a, ax_g)]
     status = fig.text(0.99, 0.01, "waiting for CSV header...", ha="right", va="bottom",
                       fontsize=9, color=MUTED)
-    fig.tight_layout(rect=(0, 0.03, 1, 1))
+    fig.tight_layout(rect=(0, 0.11, 1, 1))
+
+    # ---- Test recording controls -----------------------------------------
+    fig.text(0.015, 0.045, "Test", fontsize=10, color=INK, va="center")
+    name_box = TextBox(fig.add_axes([0.06, 0.025, 0.25, 0.04]), "", initial="test")
+    fig.text(0.33, 0.045, "Duration (s)", fontsize=10, color=INK, va="center")
+    dur_box = TextBox(fig.add_axes([0.42, 0.025, 0.07, 0.04]), "", initial="")
+    rec_btn = Button(fig.add_axes([0.51, 0.02, 0.15, 0.05]), "Start test",
+                     color="#eeeeec", hovercolor="#e2e2df")
+    rec_msg = fig.text(0.68, 0.045, "blank duration = stop manually", fontsize=9,
+                       color=MUTED, va="center")
+    rec = {"active": False, "started": None, "t0": 0.0, "dur": None}
+
+    def start_test():
+        if not reader.streaming:
+            rec_msg.set_text("waiting for data - can't record yet")
+            return
+        try:
+            d = float(dur_box.text) if dur_box.text.strip() else None
+            if d is not None and d <= 0:
+                raise ValueError
+        except ValueError:
+            rec_msg.set_text("duration must be a positive number")
+            return
+        rec.update(active=True, started=dt.datetime.now(), t0=time.monotonic(), dur=d)
+        reader.start_recording()
+        rec_btn.label.set_text("Stop & save")
+        rec_btn.color = rec_btn.hovercolor = "#f6d5d5"
+        rec_msg.set_color(REC_RED)
+
+    def stop_test():
+        lines, meta = reader.stop_recording()
+        rec["active"] = False
+        rec_btn.label.set_text("Start test")
+        rec_btn.color, rec_btn.hovercolor = "#eeeeec", "#e2e2df"
+        rec_msg.set_color(MUTED)
+        if not lines:
+            rec_msg.set_text("nothing recorded")
+            return
+        path = save_recording(args.out_dir, name_box.text, lines, meta, port, rec["started"])
+        rec_msg.set_text(f"saved {path.name} ({len(lines)} samples)")
+        print(f"Saved {path} ({len(lines)} samples) + {path.with_suffix('.png').name}")
+
+    rec_btn.on_clicked(lambda _e: stop_test() if rec["active"] else start_test())
 
     def autoscale(ax, series, floor):
         vals = [v for s in series for v in s]
@@ -152,6 +286,13 @@ def main():
             ax.set_ylim(want_lo, want_hi)
 
     def update(_):
+        if rec["active"]:
+            el = time.monotonic() - rec["t0"]
+            if rec["dur"] is not None and el >= rec["dur"]:
+                stop_test()
+            else:
+                left = f" / {rec['dur']:.0f} s" if rec["dur"] else ""
+                rec_msg.set_text(f"REC  {el:.1f} s{left}   {reader.rec_count()} samples")
         t, cols = reader.snapshot()
         if not t:
             return lines
@@ -177,6 +318,8 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        if rec["active"]:  # window closed mid-test: don't lose the data
+            stop_test()
         reader.stop = True
         ser.close()
 

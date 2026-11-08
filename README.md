@@ -131,6 +131,33 @@ python tools/live_plot.py                     # auto-detects the port
 python tools/live_plot.py /dev/cu.usbserial-0001 --window 10
 ```
 
+### Recording a test
+
+Use the bar under the plot:
+
+1. Type a **Test** name, for example `tilt-x` or `wrist-flex-1`.
+2. Optionally enter a **Duration** in seconds. If you leave it blank, the test
+   runs until you stop it.
+3. Press **Start test**. The status shows `REC  elapsed  samples`.
+4. Press **Stop & save**, or let the duration run out.
+
+Each test writes two files to `recordings/`:
+
+- `YYYY-MM-DD_HHMMSS_<name>.csv` contains every sample, not just what's on
+  screen. It starts with `#` metadata lines: test name, start time, sample
+  count and rate, units, and the firmware's chip and gyro-bias lines.
+- `YYYY-MM-DD_HHMMSS_<name>.png` is an overview plot of the whole test.
+
+To load a recording:
+
+```python
+import pandas as pd
+df = pd.read_csv("recordings/2026-11-08_151525_tilt-x.csv", comment="#")
+```
+
+Closing the window mid-test still saves what was recorded. Use `--out-dir PATH`
+to save somewhere else.
+
 Close the serial monitor first, because only one program can hold the port.
 Opening the port resets the ESP32, so calibration runs again. Keep the board
 still for the first ~3 s.
