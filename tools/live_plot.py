@@ -14,6 +14,7 @@ import argparse
 import collections
 import sys
 import threading
+import time
 
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
@@ -94,9 +95,19 @@ def main():
         ports = ", ".join(p.device for p in list_ports.comports()) or "none"
         sys.exit(f"No ESP32 serial port found (available: {ports}). Pass the port explicitly.")
     print(f"Opening {port} @ {args.baud}")
-    # Opening the port toggles DTR/RTS, which resets most ESP32 DevKits, so
-    # the startup banner and calibration will be shown again.
-    ser = serial.Serial(port, args.baud, timeout=1)
+    # ESP32 DevKits wire RTS -> EN (reset) and DTR -> GPIO0 (boot mode).
+    # pyserial asserts both on open, which can hold the chip in reset so
+    # nothing is ever received. Deassert them before opening, then pulse RTS
+    # for a clean reset so the startup banner and calibration are seen.
+    ser = serial.Serial()
+    ser.port, ser.baudrate, ser.timeout = port, args.baud, 1
+    ser.dtr = False
+    ser.rts = False
+    ser.open()
+    ser.rts = True
+    time.sleep(0.1)
+    ser.rts = False
+    print("Board reset - keep it still for ~3 s while the gyro calibrates.")
 
     reader = Reader(ser, maxlen=int(args.window * RATE_HZ * 1.2))
     reader.start()
