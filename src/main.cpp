@@ -92,8 +92,11 @@ void setup() {
                imu.address(), imu.whoAmI());
       halt(msg);
     }
-    halt(imu.address() == 0 ? "no LSM6 IMU answered at 0x6A or 0x6B"
-                            : "IMU found but reset/configuration failed");
+    if (imu.address() == 0) halt("no LSM6 IMU answered at 0x6A or 0x6B");
+    static char msg[160];
+    snprintf(msg, sizeof msg, "%s (WHO_AM_I=0x%02X) at 0x%02X: %s", imu.chipName(), imu.whoAmI(),
+             imu.address(), imu.lastError());
+    halt(msg);
   }
 
   Serial.printf("# Detected %s (WHO_AM_I=0x%02X) at I2C address 0x%02X\n", imu.chipName(),

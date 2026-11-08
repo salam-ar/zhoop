@@ -1,6 +1,8 @@
 // imu.cpp - see imu.h for the register verification table.
 #include "imu.h"
 
+#include <stdarg.h>
+
 namespace lsm6 {
 
 namespace {
@@ -15,6 +17,14 @@ constexpr float TEMP_OFFSET_C    = 25.0f;
 
 inline int16_t le16(const uint8_t* p) { return (int16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8)); }
 }  // namespace
+
+bool IMU::fail(const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(err_, sizeof err_, fmt, ap);
+  va_end(ap);
+  return false;
+}
 
 const char* IMU::chipName() const {
   switch (chip_) {
@@ -73,9 +83,9 @@ bool IMU::probe(uint8_t addr) {
 bool IMU::softwareReset() {
   // Power both sensors down first (recommended before SW_RESET on DSO; harmless
   // on the others), then reset. SW_RESET self-clears when complete (~50 us).
-  if (!writeReg(REG_CTRL1_XL, 0x00)) return false;
-  if (!writeReg(REG_CTRL2_G, 0x00)) return false;
-  if (!writeReg(REG_CTRL3_C, CTRL3_SW_RESET)) return false;
+  if (!writeReg(REG_CTRL1_XL, 0x00)) return fail("power-down write CTRL1_XL NAK");
+  if (!writeReg(REG_CTRL2_G, 0x00)) return fail("power-down write CTRL2_G NAK");
+  if (!writeReg(REG_CTRL3_C, CTRL3_SW_RESET)) return fail("SW_RESET write NAK");
 
   uint32_t t0 = millis();
   uint8_t c3 = CTRL3_SW_RESET;
@@ -83,31 +93,39 @@ bool IMU::softwareReset() {
     delay(1);
     if (!readReg(REG_CTRL3_C, c3)) continue;  // bus may NAK during reset
   } while ((c3 & CTRL3_SW_RESET) && millis() - t0 < 100);
-  if (c3 & CTRL3_SW_RESET) return false;
+  if (c3 & CTRL3_SW_RESET) return fail("SW_RESET did not clear (CTRL3_C=0x%02X)", c3);
 
   // Reload trimming parameters too (BOOT, ~10-15 ms, also self-clearing).
-  if (!writeReg(REG_CTRL3_C, CTRL3_BOOT | CTRL3_IF_INC)) return false;
+  if (!writeReg(REG_CTRL3_C, CTRL3_BOOT | CTRL3_IF_INC)) return fail("BOOT write NAK");
+  // While BOOT runs, the register file reads back as 0x00 (seen on a real
+  // LSM6DS3), so the poll below would see BOOT=0 at once. Wait out the
+  // datasheet boot time first, then confirm.
+  delay(20);
   t0 = millis();
   uint8_t c3b = CTRL3_BOOT;
   do {
     delay(2);
     if (!readReg(REG_CTRL3_C, c3b)) continue;
   } while ((c3b & CTRL3_BOOT) && millis() - t0 < 100);
-  return !(c3b & CTRL3_BOOT);
+  if (c3b & CTRL3_BOOT) return fail("BOOT did not clear (CTRL3_C=0x%02X)", c3b);
+  return true;
 }
 
 bool IMU::configure() {
   // BDU: output regs not updated until both L and H bytes have been read.
   // IF_INC: auto-increment the register address during burst reads.
-  if (!writeReg(REG_CTRL3_C, CTRL3_BDU | CTRL3_IF_INC)) return false;
-  if (!writeReg(REG_CTRL1_XL, CTRL1_XL_104HZ_4G)) return false;
-  if (!writeReg(REG_CTRL2_G, CTRL2_G_104HZ_500DPS)) return false;
+  if (!writeReg(REG_CTRL3_C, CTRL3_BDU | CTRL3_IF_INC)) return fail("CTRL3_C write NAK");
+  if (!writeReg(REG_CTRL1_XL, CTRL1_XL_104HZ_4G)) return fail("CTRL1_XL write NAK");
+  if (!writeReg(REG_CTRL2_G, CTRL2_G_104HZ_500DPS)) return fail("CTRL2_G write NAK");
 
   // Read back to catch wiring/bus problems early.
   uint8_t v[3];
-  if (!readRegs(REG_CTRL1_XL, v, 3)) return false;
-  return v[0] == CTRL1_XL_104HZ_4G && v[1] == CTRL2_G_104HZ_500DPS &&
-         (v[2] & (CTRL3_BDU | CTRL3_IF_INC)) == (CTRL3_BDU | CTRL3_IF_INC);
+  if (!readRegs(REG_CTRL1_XL, v, 3)) return fail("config read-back failed");
+  if (v[0] != CTRL1_XL_104HZ_4G || v[1] != CTRL2_G_104HZ_500DPS ||
+      (v[2] & (CTRL3_BDU | CTRL3_IF_INC)) != (CTRL3_BDU | CTRL3_IF_INC))
+    return fail("config read-back mismatch: CTRL1_XL=0x%02X CTRL2_G=0x%02X CTRL3_C=0x%02X",
+                v[0], v[1], v[2]);
+  return true;
 }
 
 bool IMU::begin() {

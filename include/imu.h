@@ -111,6 +111,8 @@ class IMU {
   uint8_t address() const { return addr_; }
   uint8_t whoAmI() const { return whoami_; }
   const char* chipName() const;
+  // Human-readable reason for the last begin() failure ("" if none).
+  const char* lastError() const { return err_; }
 
   // True when both a new accel and a new gyro sample are available.
   bool dataReady();
@@ -140,6 +142,8 @@ class IMU {
   Chip chip_ = Chip::Unknown;
   float temp_lsb_per_c_ = 16.0f;
   float gbias_[3] = {0, 0, 0};
+  char err_[96] = "";
+  bool fail(const char* fmt, ...);
 };
 
 // Scans the bus and prints every responding address to `out`.
