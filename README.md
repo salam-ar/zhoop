@@ -51,6 +51,19 @@ see them even if you open the monitor late.
 - Each sample is one 14-byte burst read from 0x20: temperature plus the
   12-byte gyro+accel block that starts at 0x22.
 
+## Sampling: INT1 data-ready (default) or polling
+
+By default the IMU's INT1 data-ready output (INT1_CTRL 0x0D, accel and gyro
+DRDY) drives sampling on GPIO 4. The ISR only sets a flag, and the I2C read
+happens in `loop()`. DRDY is latched on every variant, so it stays high until
+the outputs are read. `loop()` also treats a high pin level as pending, which
+means a missed edge cannot stall the stream. A 30 ms timeout polls STATUS as a
+last resort. At startup the firmware checks that INT1 actually toggles. If it
+doesn't, it prints `# WARNING: no activity on INT1 ...` before the header and
+falls back to polling.
+
+To force polling, add `-DIMU_USE_INT1=0` to `build_flags` in `platformio.ini`.
+
 ## Build and flash
 
 ```sh
@@ -73,6 +86,7 @@ USB-UART driver for your board. To pick the port yourself, use
 # Calibrating gyro bias for 2000 ms - keep the board still...
 # Gyro bias (dps): gx=0.4120 gy=-0.8310 gz=0.1500  (n=208 samples)
 # Gyro noise sd (dps): gx=0.0710 gy=0.0650 gz=0.0590
+# Sampling on INT1 data-ready (GPIO 4)
 t_ms,ax,ay,az,gx,gy,gz,temp_c
 2843,0.0123,-0.0201,1.0034,0.012,-0.035,0.021,27.31
 2853,0.0119,-0.0207,1.0029,-0.044,0.018,0.009,27.31

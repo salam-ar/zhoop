@@ -153,6 +153,20 @@ bool IMU::read(Sample& out) {
   return true;
 }
 
+bool IMU::enableDataReadyInt1() {
+  // INT1_CTRL (0x0D): INT1_DRDY_XL b0, INT1_DRDY_G b1 - same on all variants.
+  // Electrical defaults kept: CTRL3_C H_LACTIVE=0 (active high), PP_OD=0
+  // (push-pull). Data-ready is *latched* by default on every variant: INT1
+  // stays high until the output registers are read. (Pulsed mode exists on
+  // TR-C/DSL via DRDY_PULSE_CFG_G 0x0B and on DSO via COUNTER_BDR_REG1 0x0B,
+  // but the original LSM6DS3 has no equivalent, so we don't use it.) Latched
+  // mode lets loop() treat "pin is high" as a level-triggered backup to the
+  // edge ISR, so a missed edge can never stall the stream.
+  if (!writeReg(REG_INT1_CTRL, INT1_DRDY_XL | INT1_DRDY_G)) return false;
+  uint8_t v = 0;
+  return readReg(REG_INT1_CTRL, v) && v == (INT1_DRDY_XL | INT1_DRDY_G);
+}
+
 void scanBus(TwoWire& wire, Print& out) {
   out.println("# I2C bus scan:");
   int found = 0;

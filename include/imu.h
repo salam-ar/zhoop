@@ -119,6 +119,9 @@ class IMU {
   // physical units. Bias (if set) is subtracted from the gyro.
   bool read(Sample& out);
 
+  // Routes accel + gyro data-ready to INT1 (active high, push-pull, latched).
+  bool enableDataReadyInt1();
+
   void setGyroBias(float bx, float by, float bz) { gbias_[0] = bx; gbias_[1] = by; gbias_[2] = bz; }
 
   // Low-level helpers (public for debugging).
