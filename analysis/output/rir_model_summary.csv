@@ -1,0 +1,6 @@
+model,MAE_all,MAE_RIR_le3,within_1_rep_pct,bias
+A_baseline,0.78,0.67,84.0,-0.02
+B_vel_loss,1.18,1.18,54.0,0.06
+C_abs_mcv,1.45,1.17,46.0,0.03
+D_mvt_extrap,1.99,2.16,53.0,1.34
+E_rep_plus_vl,0.81,0.78,84.0,0.04
