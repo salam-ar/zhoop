@@ -194,3 +194,54 @@ done" on this data, for three reasons:
 - More sets per person, to average out the 10 % noise.
 - Extra fatigue cues alongside mean velocity, such as concentric duration,
   peak velocity and sticking time.
+
+## 6. Estimating RIR on sets stopped before failure (velocity only)
+
+This is the real use case: you stop a set at rep *k* and want to know how many
+reps were left. The to-failure sets serve as ground truth. Each one is cut off
+at every rep k ≥ 3, and the model sees only reps 1..k. It is given **no
+information about how long sets usually last**, because when you stop early
+you don't know that. Each model is trained on 5 sets and tested on the 6th.
+Script: `analysis/stop_early_rir.py`.
+
+![stopped-early RIR](output/stop_early_rir.png)
+
+| Features at the stopping rep | MAE (reps) | RIR 0–2 | RIR 3–5 | RIR 6+ |
+|---|---|---|---|---|
+| **2-rep avg velocity + velocity loss** | **0.89** | 0.85 | 0.73 | 1.28 |
+| velocity loss only | 0.92 | 1.02 | 0.67 | 1.23 |
+| 2-rep avg velocity only | 0.96 | 0.76 | 0.87 | 1.53 |
+| concentric time only | 1.19 | 1.40 | 0.63 | 1.93 |
+| *(reference) count prior, needs known set length* | *0.77* | | | |
+
+Velocity alone comes within 0.1 rep of the count prior, without knowing the
+set length. It is most accurate between RIR 0 and 6. Above RIR 6, early reps
+look alike and there are only 3 test reps, so errors there are unreliable.
+
+**Formula** (fit on all six sets; speeds are mean concentric angular velocity
+in °/s):
+
+    RIR ≈ 0.44 + 0.039 × (average speed of the last 2 reps) − 0.044 × (velocity loss %)
+
+| Last-2-rep avg speed | Velocity loss | Estimated RIR |
+|---|---|---|
+| 120 °/s | 0 % | about 5 |
+| 100 °/s | 15 % | about 3.7 |
+| 90 °/s | 25 % | about 2.8 |
+| 70 °/s | 40 % | about 1.4 |
+| 50 °/s | 60 % | about 0 |
+
+**Yes/no version: "Am I within 2 reps of failure?"** A 2-rep average speed
+below **90 °/s** caught 83 % of reps with RIR ≤ 2 and gave **no false alarms**
+on reps with RIR ≥ 3. With the threshold fit on 5 sets and tested on the 6th,
+it was right 91 % of the time.
+
+**Before relying on this**, check that the formula still holds:
+- **at other loads.** Re-run with a heavier and a lighter dumbbell taken to
+  failure. Velocity loss is expected to transfer across loads better than
+  absolute speed does.
+- **for other people.** The 90 °/s threshold and the formula are specific to
+  this lifter and this exercise. Expect to calibrate each person with 2–3
+  to-failure sets.
+- **on genuinely stopped-early sets.** Do a few sets stopped at a target RIR,
+  then continue to failure after a short pause, to confirm the true RIR.
