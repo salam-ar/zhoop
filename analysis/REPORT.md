@@ -138,3 +138,59 @@ collapses, which a straight line can't anticipate.
   - Add concentric duration and sticking time as features (stalls of 0.5 s or
     more appeared only on the last 1–2 reps of a set).
   - Calibrate the forearm radius per person if absolute m/s matter.
+
+## 5. Is the decline the same shape in every set, and can early reps predict RIR?
+
+Script: `analysis/early_rep_rir.py`. Each set's velocity is divided by its own
+reps 1–3 average, so all six sets are on the same scale.
+
+![decline shape](output/decline_shape.png)
+
+**The shape is consistent.** Every set follows the same three phases:
+
+1. **Plateau or rise:** reps 1–5 run at 90–128 % of the starting speed, with the
+   fastest rep usually rep 3–5.
+2. **Gradual decline:** from about 5 reps before failure, speed falls to about
+   85 % and then about 70 % of the starting speed.
+3. **Collapse:** the last rep drops to about 40 % (range 22–52 %).
+
+Averaged across sets, this gives the template (RIR 8 → 0):
+0.94, 1.03, 1.08, 1.08, 0.89, 0.84, 0.69, 0.68, **0.39**.
+
+The sets lie within about ±0.10–0.12 of each other whether they're aligned from
+the start or from failure. The two alignments can't be told apart here because
+every set lasted 9–11 reps.
+
+**Predicting RIR from the first k reps.** Each method was trained on 5 sets and
+tested on the 6th:
+
+![early prediction error](output/early_rir_error.png)
+
+| After k reps | Count prior | Velocity loss | Slope of reps 1..k | Template match |
+|---|---|---|---|---|
+| 4 | **0.8** | 1.1 | 1.0 | 0.8 |
+| 5 | 0.8 | 0.7 | 1.0 | **0.7** |
+| 6 | **0.8** | 1.3 | 0.9 | 1.5 |
+| 7 | 0.8 | 1.1 | 1.0 | **0.7** |
+| 8 | **0.8** | 1.8 | 1.0 | 1.0 |
+
+The template match sometimes beats counting, but not consistently. At k = 6 it
+predicted 8 reps left for test2correct, whose first six reps hadn't slowed yet;
+the true value was 3. Nothing reliably beats "typical set length minus reps
+done" on this data, for three reasons:
+
+- **There's no decline to measure yet.** The decline starts only about 4–5
+  reps before failure. With 9–11-rep sets, reps 1–6 are mostly plateau.
+- **Rep-to-rep noise (about 10 %) is as large as the signal.** The difference
+  between 5 and 3 RIR is about 0.89 vs 0.84 on the template, smaller than one
+  rep's random variation.
+- **The baseline is already very good.** After 6 reps every set had 3–5 reps
+  left, so counting is already within about 1 rep.
+
+**What would make early prediction work:**
+- Sets with *different* lengths: different loads, or sets taken after
+  pre-fatigue. A 5-rep set would show the decline from rep 1, and the
+  template/slope approach has something to work with.
+- More sets per person, to average out the 10 % noise.
+- Extra fatigue cues alongside mean velocity, such as concentric duration,
+  peak velocity and sticking time.
