@@ -1,0 +1,10 @@
+model,group,params,MAE,MAE_rir_0_2,within1,sets_better,sets_worse,worst_set_MAE
+current: velocity (linear),transferable,3,0.89,0.85,60.0,0,0,1.391
+velocity + rest before rep (linear),transferable,4,0.926,0.911,60.0,1,5,1.446
+velocity + avg rest last 2 (linear),transferable,4,0.929,0.922,62.222,4,2,1.352
+velocity + rest + effort (ridge),transferable,8,0.91,0.973,62.222,2,4,1.192
+velocity + rest + effort (random forest),transferable,400,0.919,0.668,64.444,3,3,1.255
+velocity + rest + effort (boosting),transferable,150,0.995,0.696,57.778,1,5,1.406
+velocity + fatigue-recovery state F,set-clock,5,0.754,0.593,71.111,3,3,1.309
+velocity + elapsed time + k (linear),set-clock,5,0.9,0.761,64.444,3,3,1.562
+everything (random forest),set-clock,400,0.898,0.725,62.222,4,2,1.42

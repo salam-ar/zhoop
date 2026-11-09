@@ -245,3 +245,71 @@ it was right 91 % of the time.
   to-failure sets.
 - **on genuinely stopped-early sets.** Do a few sets stopped at a target RIR,
   then continue to failure after a short pause, to confirm the true RIR.
+
+## 7. Does inter-rep rest explain the errors? Simple vs complex models
+
+Script: `analysis/model_comparison.py`. The setup matches section 6: sets
+stopped at every rep k ≥ 3, each model trained on 5 sets and tested on the 6th.
+
+**Rest between reps.** This is the pause at the bottom, from the end of one
+rep's lowering phase to the start of the next lift. It grows near failure:
+about 0–0.5 s early in the set and 2–4 s at the end (correlation with RIR
+−0.37).
+
+**Rest does not explain the velocity model's misses.**
+- The current model's error is uncorrelated with the rest before the rep
+  (r = +0.02) and with the average rest over the last two reps (r = −0.08).
+- A longer pause does not reliably make the next rep faster: the correlation
+  between a pause change and the speed change that follows is +0.09.
+- Of the 7 big misses (error ≥ 1.5 reps), only 2 came after a long pause
+  (test2correct rep 8 after 2.9 s, test4 rep 5 after 1.9 s). The worst ones
+  (test1 reps 7–8) followed pauses of 0.05–0.5 s. Those reps simply hadn't
+  slowed down yet.
+
+![model comparison](output/model_comparison.png)
+
+| Model | Parameters | MAE trained on | MAE held out | RIR 0–2 |
+|---|---|---|---|---|
+| **current: velocity (linear)** | 3 | 0.78 | **0.89** | 0.85 |
+| + rest before rep (linear) | 4 | 0.78 | 0.93 | 0.91 |
+| + avg rest last 2 reps (linear) | 4 | 0.77 | 0.93 | 0.92 |
+| + rest + effort cues (ridge) | 8 | 0.76 | 0.91 | 0.97 |
+| + rest + effort cues (random forest) | ~400 trees | 0.45 | 0.92 | 0.67 |
+| + rest + effort cues (gradient boosting) | ~150 trees | 0.20 | 1.00 | 0.70 |
+| *velocity + fatigue-recovery state* | 5 | 0.51 | *0.75* | 0.59 |
+| *velocity + elapsed time + reps done* | 5 | 0.59 | *0.90* | 0.76 |
+
+Rows in italics use a "set clock": a feature that grows with every rep.
+
+**Fatigue-recovery state.** This model adds a running fatigue score: +1 per
+rep, decaying exponentially during pauses with time constant τ, which is chosen
+from the training sets each time. It is the only model to beat the current one.
+Two checks on where its gain comes from:
+- **Shuffling the rest times** within each set (30 random shuffles) raises its
+  error to 0.80 ± 0.04. The real rest timing helps a little: weak evidence,
+  about 1 SD.
+- **Its best τ (8–16 s) makes the score track reps done** (r = 0.67–0.92), and
+  "velocity + reps done" alone already reaches 0.81.
+
+So most of the gain is the set clock: it learns that sets at this weight last
+about 10 reps. That won't carry over to a different load.
+
+**Simple vs complex models.**
+
+| | Current linear (velocity) | Complex (forest, boosting, many features) |
+|---|---|---|
+| Held-out error here | 0.89 | 0.90–1.00 (no better) |
+| Overfitting gap (trained on vs held out) | 0.11 | 0.47–0.80 (memorises the 6 sets) |
+| Data needed | works with 2–3 sets to failure | hundreds of reps across loads and people |
+| Interpretable | yes: speed ↓ and loss ↑ mean fewer RIR | no |
+| Runs on the ESP32 live | trivially (3 numbers) | possible, but awkward |
+| Transfers to new loads | likely (velocity-based) | unknown; the set-clock versions won't |
+
+**Conclusion.** On this data, the noise is in velocity itself: some sets don't
+slow until the last 1–2 reps. Rest and model complexity can't fix that.
+
+Keep the simple model, and revisit two ideas once there are more sets at
+different loads:
+- **the fatigue-recovery state**, the one idea with a hint of real signal
+- **a complex model**, which needs more data than six sets to beat a
+  3-parameter fit

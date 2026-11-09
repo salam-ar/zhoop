@@ -281,6 +281,7 @@ def rep_table(trials):
             rows.append(dict(
                 trial=tr.name, side=tr.side, set=tr.set_no, rep=r.idx if r.full else None,
                 full=r.full, kind=r.kind, rir=r.rir, t_start=round(tr.d.t.iloc[r.i0], 2),
+                t_top=round(tr.d.t.iloc[r.i_pk], 2), t_end=round(tr.d.t.iloc[r.i1], 2),
                 rom_deg=round(r.rom, 1), t_con_s=round(r.t_con, 3), t_ecc_s=round(r.t_ecc, 3),
                 mcv_ang_dps=round(r.mcv_ang, 1), pcv_ang_dps=round(r.pcv_ang, 1),
                 mcv_lin_r_ms=round(r.mcv_lin_r, 3), mcv_speed_acc_ms=round(r.mcv_lin_acc, 3),
