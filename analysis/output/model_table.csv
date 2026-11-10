@@ -1,0 +1,8 @@
+label,inputs,how,held,ins,near,within1,better,worse
+Current,"speed, velocity loss",weighted sum,0.89,0.778,0.85,60.0,0,0
++ rest before rep,"speed, velocity loss, rest",weighted sum,0.926,0.778,0.911,60.0,1,5
++ avg rest of last 2 reps,"speed, velocity loss, rest",weighted sum,0.929,0.773,0.922,62.222,4,2
+Ridge,"speed, vel. loss, rest, effort cues","weighted sum, penalised",0.91,0.76,0.973,62.222,2,4
+Random forest,same 7 inputs,average of 400 trees,0.919,0.45,0.668,64.444,3,3
+Gradient boosting,same 7 inputs,"150 trees, each fixing the last",0.995,0.203,0.696,57.778,1,5
+Fatigue-recovery,"speed, vel. loss, fatigue score",weighted sum,0.754,0.511,0.593,71.111,3,3
