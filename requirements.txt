@@ -1,0 +1,7 @@
+# Python tools: live plotter (tools/) and analysis (analysis/)
+pyserial==3.5
+matplotlib==3.11.2
+numpy==2.5.4
+scipy==1.18.1
+pandas==3.1.1
+scikit-learn==1.9.1

@@ -1,8 +1,54 @@
-# ESP32 + LSM6 IMU streamer
+# EMG/IMU tracker: velocity-based curl analysis with an ESP32 + LSM6 IMU
 
-ESP32 DevKit firmware (Arduino framework, PlatformIO) that reads an ST
-LSM6-series 6-axis IMU over I2C using a small register-level driver and streams
-CSV over serial.
+This repo contains two things:
+
+1. **Firmware.** ESP32 DevKit firmware (Arduino framework, PlatformIO) that
+   reads an ST LSM6-series 6-axis IMU over I2C with a small register-level
+   driver and streams CSV over serial. It comes with a live plotter that
+   records tests.
+2. **An experiment and its analysis.** The IMU was strapped to a dumbbell for
+   six sets of biceps curls taken to failure, three per arm. The analysis
+   detects reps, measures lifting velocity and its decline, and tests ways to
+   estimate **reps in reserve (RIR)** from velocity, including on sets stopped
+   before failure.
+
+**Main findings:** see [`analysis/REPORT.md`](analysis/REPORT.md) for the full
+write-up.
+- Reps are detected reliably: 9–11 per set, each set ending in a failed attempt.
+- Lifting speed falls 58–82 % by the last rep, in the same three-phase shape in
+  every set: plateau, gradual decline, then collapse.
+- On sets stopped early, velocity alone estimates RIR to within about 0.9 reps
+  on average: RIR ≈ 0.44 + 0.039 × (2-rep average speed, °/s) − 0.044 ×
+  (velocity loss %).
+- Inter-rep rest and more complex models (random forest, boosting) did not
+  improve on this simple formula.
+
+## Repository layout
+
+```
+platformio.ini            PlatformIO project (ESP32 DevKit)
+include/imu.h             driver API + register verification table
+src/imu.cpp               driver: detect, reset, configure, burst read, unit conversion
+src/main.cpp              setup (detect, calibrate), CSV streaming loop
+tools/live_plot.py        live plot of the six axes + test recorder
+recordings/               raw IMU data from the curl experiment (CSV + overview PNG)
+analysis/REPORT.md        write-up of the curl experiment
+analysis/*.py             analysis scripts (see "Analysis" below)
+analysis/output/          generated figures and tables
+requirements.txt          Python dependencies
+```
+
+## Quick start
+
+```sh
+# firmware
+pio run -t upload                     # build + flash
+# Python tools
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python tools/live_plot.py   # live plot + recorder
+```
+
+# Firmware
 
 ## Wiring (fixed)
 
@@ -15,16 +61,6 @@ CSV over serial.
 | CS      | 3V3 (I2C mode) |
 | SA0     | GND -> address 0x6A |
 | INT1    | GPIO 4       |
-
-## Layout
-
-```
-platformio.ini
-include/imu.h      driver API + register verification table
-src/imu.cpp        driver: detect, reset, configure, burst read, unit conversion
-src/main.cpp       setup (detect, calibrate), CSV streaming loop
-tools/live_plot.py live plot of the six axes (pyserial + matplotlib)
-```
 
 ## Supported chips (detected by WHO_AM_I, reg 0x0F)
 
@@ -126,7 +162,7 @@ The live plotter shows |a| and temperature in its status line.
 ## Live plot
 
 ```sh
-pip install pyserial matplotlib
+pip install -r requirements.txt
 python tools/live_plot.py                     # auto-detects the port
 python tools/live_plot.py /dev/cu.usbserial-0001 --window 10
 ```
@@ -161,3 +197,42 @@ to save somewhere else.
 Close the serial monitor first, because only one program can hold the port.
 Opening the port resets the ESP32, so calibration runs again. Keep the board
 still for the first ~3 s.
+
+# Curl experiment and analysis
+
+## Data
+
+`recordings/` holds the raw sets. The IMU was strapped to the dumbbell and
+sampled at 103 Hz.
+
+| File | Arm | Set | Notes |
+|---|---|---|---|
+| `*_test1.csv` | Left | 1 | |
+| `*_test2.csv` | Right | – | incomplete, **excluded** from the analysis |
+| `*_test2correct.csv` | Right | 1 | replaces test2 |
+| `*_test3.csv` | Left | 2 | |
+| `*_test4.csv` | Right | 2 | |
+| `*_test5.csv` | Left | 3 | |
+| `*_test6.csv` | Right | 3 | |
+
+## Analysis
+
+Run the scripts in this order; each writes into `analysis/output/`:
+
+```sh
+.venv/bin/python analysis/analyze_curls.py     # rep detection, per-rep velocity, RIR models
+.venv/bin/python analysis/early_rep_rir.py     # decline shape, prediction from the first k reps
+.venv/bin/python analysis/stop_early_rir.py    # velocity-only RIR for sets stopped early
+.venv/bin/python analysis/model_comparison.py  # inter-rep rest, simple vs complex models
+.venv/bin/python analysis/plot_model_table.py  # one-figure model summary
+```
+
+| Output | What it is |
+|---|---|
+| `reps.csv` | One row per rep: ROM, concentric/eccentric time, mean/peak velocity, velocity loss, stall time, RIR |
+| `trial_*.png` | Per-set angle, angular velocity and vertical velocity with detected reps shaded |
+| `velocity_by_rep.png`, `decline_shape.png` | Velocity decline across reps, raw and normalised |
+| `rir_predictions.png`, `stop_early_rir.png` | RIR estimates vs actual |
+| `model_comparison.png`, `model_table.png` | Comparison of all RIR models |
+
+The results, methods and limitations are in [`analysis/REPORT.md`](analysis/REPORT.md).
